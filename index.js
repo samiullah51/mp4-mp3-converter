@@ -2,12 +2,13 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
-const { stdout, stderr } = require("process");
-// converting mp4 to mp3
-const app = express();
+const ffmpeg = require("fluent-ffmpeg");
+const ytdlp = require("yt-dlp-exec");
 
+const app = express();
+// convert link to mp3
 app.use(express.static("public"));
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 5000;
 
@@ -16,7 +17,6 @@ const subDir = "public/uploads";
 
 if (!fs.existsSync(dir)) {
   fs.mkdirSync(dir);
-  // why both are same? because subDir is "public/uploads"
   fs.mkdirSync(subDir);
 }
 
@@ -38,18 +38,15 @@ app.get("/", (req, res) => {
   res.sendFile(__dirname + "/index.html");
 });
 
-// single("file") => "file" came from name attribute of the html input form
 app.post("/convert", upload.single("file"), (req, res) => {
   if (req.file) {
     console.log(req.file.path);
 
     const output = Date.now() + "-" + "convertedAudio.mp3";
 
-    exec(`ffmpeg -i ${req.file.path} ${output}`, (error, stdout, stderr) => {
-      if (error) {
-        console.log(`Convert Error: ${error}`);
-        return;
-      } else {
+    ffmpeg(req.file.path)
+      .toFormat("mp3")
+      .on("end", () => {
         console.log("File is converted");
         res.download(output, (error) => {
           if (error) {
@@ -59,11 +56,34 @@ app.post("/convert", upload.single("file"), (req, res) => {
             fs.unlinkSync(output);
           }
         });
-      }
-    });
+      })
+      .saveToFile(output);
+  } else if (req.body.videoURL) {
+    const videoURL = req.body.videoURL;
+    const output = Date.now() + "-" + "convertedAudio.mp3";
+
+    ytdlp(videoURL, {
+      extractAudio: true,
+      audioFormat: "mp3",
+      output: output,
+    })
+      .then(() => {
+        console.log("Video is converted");
+        res.download(output, (error) => {
+          if (error) {
+            throw error;
+          } else {
+            fs.unlinkSync(output);
+          }
+        });
+      })
+      .catch((error) => {
+        console.log(`Convert Error: ${error}`);
+        res.status(500).send("Error converting video");
+      });
   }
 });
 
 app.listen(PORT, () => {
-  console.log("Server: http://localhost:5000");
+  console.log(`Server: http://localhost:${PORT}`);
 });
